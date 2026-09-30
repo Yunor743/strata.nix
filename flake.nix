@@ -69,6 +69,20 @@
 
       nixosModules.strata = self.nixosModules.default;
 
+      nixosConfigurations.strata-eval = nixpkgs.lib.nixosSystem {
+        system = system;
+        modules = [
+          self.nixosModules.default
+          ({ ... }: {
+            boot.isContainer = true;
+            system.stateVersion = "26.11";
+            services.strata.enable = true;
+            services.strata.mockEngine = false;
+            services.strata.prefetchOnStart = true;
+          })
+        ];
+      };
+
       checks.${system} = {
         serve-smoke = pkgs.callPackage ./checks/serve-smoke.nix {
           strataPkg = strataPkgs.strata;

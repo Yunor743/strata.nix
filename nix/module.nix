@@ -156,7 +156,7 @@ in
         CUDA_VISIBLE_DEVICES = lib.concatStringsSep "," cfg.gpus;
       };
 
-      preStart = lib.mkIf (cfg.prefetchOnStart && !cfg.mockEngine) (
+      preStart = lib.mkIf (cfg.prefetchOnStart && !cfg.mockEngine) (toString (
         pkgs.writeShellScript "strata-prestart" (''
           set -euo pipefail
           state="$STATE_DIRECTORY"
@@ -183,7 +183,7 @@ in
             --mcp-json ${pkgs.writeText "strata-mcp.json" (builtins.toJSON cfg.mcpServers)} \
         '' + lib.concatMapStrings (x: ''--extra-arg ${lib.escapeShellArg x} '') cfg.extraEngineArgs
         )
-      );
+      ));
 
       serviceConfig = {
         Type = "simple";
