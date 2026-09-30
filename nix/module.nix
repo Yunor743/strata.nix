@@ -190,6 +190,10 @@ in
         DynamicUser = true;
         StateDirectory = "strata";
         StateDirectoryMode = "0750";
+        # First start: preStart downloads ~70 GB and builds the pack - the default
+        # 90 s TimeoutStartSec kills it mid-download (the service is resumable, but
+        # converge it in one pass). Applies to the start, incl. ExecStartPre.
+        TimeoutStartSec = "0";
         WorkingDirectory = "%S/strata";
         UMask = "0077";
         Restart = "on-failure";
