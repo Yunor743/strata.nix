@@ -1,0 +1,63 @@
+{
+  "nodes": {
+    "llama-pinned": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1789891691,
+        "narHash": "sha256-SRGoXa+4ACBCB3eaG9XFYhMN1i0FyPEy9Rrer+dFGYI=",
+        "owner": "ggml-org",
+        "repo": "llama.cpp",
+        "rev": "3cf03257f219afbe7334045ff7c6a06ac68c627d",
+        "type": "github"
+      },
+      "original": {
+        "owner": "ggml-org",
+        "repo": "llama.cpp",
+        "rev": "3cf03257f219afbe7334045ff7c6a06ac68c627d",
+        "type": "github"
+      }
+    },
+    "nixpkgs": {
+      "locked": {
+        "lastModified": 1790578696,
+        "narHash": "sha256-ZoxIApko70jCdbH3l20HWXOBaT2HZd87orzd2yJ9dVE=",
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "7a0f122f5090cf4c2ade2a13a0e229d4e19ba71f",
+        "type": "github"
+      },
+      "original": {
+        "owner": "NixOS",
+        "ref": "nixos-unstable",
+        "repo": "nixpkgs",
+        "type": "github"
+      }
+    },
+    "root": {
+      "inputs": {
+        "llama-pinned": "llama-pinned",
+        "nixpkgs": "nixpkgs",
+        "strata": "strata"
+      }
+    },
+    "strata": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1790715539,
+        "narHash": "sha256-rvYrScZuWliKPCMfESUsIqtGiQVZ6cy7qvqSlfyoitA=",
+        "owner": "Niko1221",
+        "repo": "Strata",
+        "rev": "a79080535d1b2a71a3419a0d97d8e7dca194b0f1",
+        "type": "github"
+      },
+      "original": {
+        "owner": "Niko1221",
+        "ref": "main",
+        "repo": "Strata",
+        "type": "github"
+      }
+    }
+  },
+  "root": "root",
+  "version": 7
+}
