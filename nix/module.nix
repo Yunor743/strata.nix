@@ -2,6 +2,11 @@
 { pkgs, config, lib, ... }:
 let
   cfg = config.services.strata;
+  defaultDataDir = "/var/lib/strata";
+  # A data dir elsewhere (another disk) gets a static owner: DynamicUser manages only its own StateDirectory.
+  staticUser = cfg.dataDir != defaultDataDir;
+  # Unit directives split on whitespace; escape the spaces so a spaced path parses.
+  escDataDir = lib.concatStringsSep "\\ " (lib.splitString " " cfg.dataDir);
 in
 {
   options.services.strata = {
@@ -118,6 +123,17 @@ in
       default = true;
       description = "Download/prepare missing model files before starting (resumable, skipped when done).";
     };
+
+    dataDir = lib.mkOption {
+      type = lib.types.path;
+      default = defaultDataDir;
+      example = "/data/strata";
+      description = ''
+        Where the weights, pack, MTP draft layer and config.json live.
+        The default is the service's StateDirectory under a DynamicUser; any other path
+        runs the service as the static `strata` user and requires its mount.
+      '';
+    };
   };
 
   config = lib.mkIf cfg.enable {
@@ -164,7 +180,7 @@ in
       preStart = lib.mkIf (cfg.prefetchOnStart && !cfg.mockEngine) (toString (
         pkgs.writeShellScript "strata-prestart" (''
           set -euo pipefail
-          state="$STATE_DIRECTORY"
+          state="${lib.escapeShellArg cfg.dataDir}"
           exec ${cfg.package}/bin/strata-prefetch \
             --family ${lib.escapeShellArg cfg.family} \
             --model ${lib.escapeShellArg cfg.model} \
@@ -192,14 +208,11 @@ in
 
       serviceConfig = {
         Type = "simple";
-        DynamicUser = true;
-        StateDirectory = "strata";
-        StateDirectoryMode = "0750";
         # First start: preStart downloads ~70 GB and builds the pack - the default
         # 90 s TimeoutStartSec kills it mid-download (the service is resumable, but
         # converge it in one pass). Applies to the start, incl. ExecStartPre.
         TimeoutStartSec = "0";
-        WorkingDirectory = "%S/strata";
+        WorkingDirectory = escDataDir;
         UMask = "0077";
         Restart = "on-failure";
         RestartSec = 10;
@@ -207,13 +220,12 @@ in
           (lib.optional (cfg.apiKeyFile != null) "api-key:${cfg.apiKeyFile}")
           ++ (lib.optional (cfg.hfTokenFile != null) "hf-token:${cfg.hfTokenFile}");
         ExecStart =
-          if cfg.mockEngine
-          then
-            "${cfg.package}/bin/strata-serve --engine mock --port ${toString cfg.port} " +
-            "--host ${lib.escapeShellArg cfg.host}"
+          if cfg.mockEngine then
+            "${cfg.package}/bin/strata-serve --engine mock --port ${toString cfg.port} "
+            + "--host ${lib.escapeShellArg cfg.host}"
           else
-            "${cfg.package}/bin/strata-serve --engine strata --config %S/strata/config.json " +
-            "--port ${toString cfg.port}";
+            "${cfg.package}/bin/strata-serve --engine strata --config ${escDataDir}/config.json "
+            + "--port ${toString cfg.port}";
         NoNewPrivileges = true;
         ProtectSystem = "strict";
         ProtectHome = true;
@@ -224,8 +236,34 @@ in
         RestrictAddressFamilies = [ "AF_UNIX" "AF_INET" "AF_INET6" ];
         LockPersonality = true;
         MemoryDenyWriteExecute = false;
-      };
+      }
+      // (
+        if staticUser then
+          {
+            User = "strata";
+            Group = "strata";
+            ReadWritePaths = [ escDataDir ];
+          }
+        else
+          {
+            DynamicUser = true;
+            StateDirectory = "strata";
+            StateDirectoryMode = "0750";
+          }
+      );
     };
+
+    users = lib.mkIf staticUser {
+      users.strata = {
+        isSystemUser = true;
+        group = "strata";
+        home = cfg.dataDir;
+      };
+      groups.strata = { };
+    };
+
+    # tmpfiles needs the path quoted when it contains spaces.
+    systemd.tmpfiles.rules = lib.mkIf staticUser [ "d \"${cfg.dataDir}\" 0750 strata strata - -" ];
 
     networking.firewall.allowedTCPPorts = lib.mkIf cfg.openFirewall [ cfg.port ];
   };
