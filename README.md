@@ -10,7 +10,7 @@ and serves it over an OpenAI- and Anthropic-compatible API on localhost.
 │ / web chat  │   http://127.0.0.1    │  (python)     │                  │ (CUDA, built   │
 └─────────────┘                       └───────────────┘                  │  from source)  │
                                                                           └────────────────┘
-        weights: downloaded once (resumable) into /var/lib/strata, not in the nix store
+        weights: downloaded once (resumable) into the data dir, not in the nix store
 ```
 
 ## Requirements
@@ -46,7 +46,7 @@ The service:
 
 1. (first start) downloads the model shards from Hugging Face and builds the pack and
    the MTP draft layer. Interrupted? Start again, it picks up where it left off;
-2. writes `/var/lib/strata/config.json` (engine arguments, API key if any);
+2. writes `<dataDir>/config.json` (engine arguments, API key if any);
 3. starts `strata-serve` on `http://127.0.0.1:8080`.
 
 Loading pushes 35-55 GB into RAM and the machine can crawl for 1-3 minutes.
@@ -72,6 +72,7 @@ That is normal. API: `http://127.0.0.1:8080/v1/chat/completions` (OpenAI) and
 | `mcpServers` | `{ }` | MCP servers for the web chat (Claude Desktop format; they run with the service's rights). |
 | `extraEngineArgs` | `[ ]` | Extra engine arguments, e.g. `[ "--kv" "q4_0" ]`. |
 | `mockEngine` | `false` | Scripted mock instead of the model (tests; no GPU, no download). |
+| `dataDir` | `/var/lib/strata` | Weights, pack, MTP layer and `config.json`. Another path runs the service as the static `strata` user and requires its mount. |
 
 Example with the original model, the best quant and a LAN-reachable API:
 
