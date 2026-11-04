@@ -1,22 +1,25 @@
 # strata.nix
 
 A NixOS service around [Strata](https://github.com/Niko1221/Strata), the engine
-that runs **Qwen3.8-Flash-Next** (125B MoE, ~6B active) on a single NVIDIA GPU
+that runs **Qwen3.8-Flash-Next** (125B MoE, ~6B active) on a single NVIDIA or AMD Radeon GPU
 and serves it over an OpenAI- and Anthropic-compatible API on localhost.
 
 ```
 ┌─────────────┐   OpenAI/Anthropic    ┌───────────────┐   stdin/stdout   ┌────────────────┐
 │ your apps   │ ────  HTTP  API  ───▶ │  strata-serve │ ───────────────▶ │ strata engine  │
-│ / web chat  │   http://127.0.0.1    │  (python)     │                  │ (CUDA, built   │
-└─────────────┘                       └───────────────┘                  │  from source)  │
+│ / web chat  │   http://127.0.0.1    │  (python)     │                  │ (CUDA or HIP,  │
+└─────────────┘                       └───────────────┘                  │  built from    │
+                                                                          │  source)       │
                                                                           └────────────────┘
         weights: downloaded once (resumable) into /var/lib/strata, not in the nix store
 ```
 
 ## Requirements
 
-- NixOS on **x86_64-linux** with an NVIDIA RTX 20/30/40/50 GPU (12 GB VRAM or more)
-  and the official driver (580+). About 64 GB of RAM for IQ2_XS and below.
+- NixOS on **x86_64-linux** with either
+  - an NVIDIA RTX 20/30/40/50 GPU (12 GB VRAM or more) and the official driver (580+), or
+  - an AMD Radeon RDNA3/RDNA4 GPU (default build: gfx1100, RX 7900 XT / XTX) and the kernel's amdgpu driver.
+- About 64 GB of RAM for IQ2_XS and below.
 - ~70 GB of free disk space for the model files (downloaded at first service start).
 
 ## Quick start
@@ -58,7 +61,7 @@ That is normal. API: `http://127.0.0.1:8080/v1/chat/completions` (OpenAI) and
 | Option | Default | Meaning |
 | --- | --- | --- |
 | `enable` | `false` | Enable the service. |
-| `package` | `strataPkgs.strata` | The strata-serve bundle (carries the engine). |
+| `package` | `strataPkgs.strata` | The strata-serve bundle (carries the engine): `strata` (CUDA) or `strata-hip` (AMD). |
 | `family` | `swift` | `swift` (Swift 1.5: same accuracy, answers ~1.8x sooner), `abliterated` (Swift 1.5 uncensored, SC117; Q2_0/IQ2_XS/IQ3_XXS only), `qwen` (original) or `coder` (half the experts, code-focused, ~32 GB RAM). |
 | `model` | `IQ2_XS` | `Q2_0` / `IQ2_XS` / `IQ3_XXS` / `IQ3_S` (qwen only) / `IQ1_M` (coder only). |
 | `context` | `32768` | 8192-1048576 tokens. Past 262144 strata-prefetch adds yarn rope scaling (experimental upstream). |
@@ -66,7 +69,7 @@ That is normal. API: `http://127.0.0.1:8080/v1/chat/completions` (OpenAI) and
 | `apiKeyFile` | `null` | Path to a file with the API key (systemd credential). Required when `host` is not loopback. |
 | `hfTokenFile` | `null` | Hugging Face token file, only for gated repos. |
 | `openFirewall` | `false` | Open the TCP port in the firewall. |
-| `gpus` | `[ ]` | CUDA device indices; several = layer split. Empty: the card with the most VRAM. |
+| `gpus` | `[ ]` | CUDA (with `strata-hip`: HIP) device indices; several = layer split. Empty: the card with the most VRAM. |
 | `lowRam` | `null` | Map experts from disk instead of RAM copies (auto when RAM is short). |
 | `sampling` | `{ }` | Sampling defaults (temperature, top_p, top_k, ...). |
 | `mcpServers` | `{ }` | MCP servers for the web chat (Claude Desktop format; they run with the service's rights). |
@@ -94,6 +97,8 @@ services.strata = {
   (the download/prepare tool, usable standalone; `strata-prefetch --help`).
 - `strata-engine`, the CUDA inference binary built from source
   (`strata-engine.override { cudaArch = "120"; }` for an RTX 50 card; default `89` = RTX 40).
+- `strata-hip` and `strata-engine-hip`, the same with the HIP engine for AMD cards
+  (`strata-engine-hip.override { hipArch = "gfx1201"; }` for RDNA4; default `gfx1100`).
 - The model weights are **not** packaged: they are downloaded at runtime into the
   service's state directory (the nix store would not survive a 70 GB model well).
 
@@ -104,6 +109,13 @@ services.strata = {
 `third_party/ggml/VERSION.txt`. If Strata bumps that pin, evaluation fails with the
 new commit and an instruction to update the `llama-pinned` input.
 
+`strata-engine-hip` compiles the same source with nixpkgs' `rocmPackages`
+(`-DSTRATA_ENABLE_HIP=ON -DSTRATA_PREFILL_MMQ=ON -DSTRATA_MMQ_KQUANTS=ON`). It installs the
+hipBLASLt tuning table Strata ships for the card and the ROCm's hipBLASLt version
+(`tools/hip/<arch>-hipblaslt-<version>.txt`); the module hands it to the engine as
+`STRATA_HIPBLASLT_TUNING`. Without a matching table the build fails before compiling, since
+the engine would otherwise fall back to the slower plain-hipBLAS prompt path.
+
 The flake input `strata` tracks upstream `main`. The lock file decides what you
 actually run. `nix flake lock --update-input strata` pulls new releases
 (and new engine features). Read what lands in the lock before you run it.
@@ -113,6 +125,7 @@ actually run. `nix flake lock --update-input strata` pulls new releases
 - `nix flake check`: a serve smoke test (mock engine: HTTP endpoints without a GPU)
   and a NixOS VM test of the systemd service with the mock engine.
 - `nix build .#strata-engine`: the real compile (20-40 minutes, once, cached after).
+- `nix build .#strata-engine-hip`: the same for the AMD engine.
 
 ## Licenses
 
