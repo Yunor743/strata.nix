@@ -2,6 +2,9 @@
 { pkgs, config, lib, ... }:
 let
   cfg = config.services.strata;
+  engine = cfg.package.passthru.engine or null;
+  hip = !cfg.mockEngine && (engine.backend or "cuda") == "hip";
+  gpuList = lib.concatStringsSep "," cfg.gpus;
 in
 {
   options.services.strata = {
@@ -70,7 +73,7 @@ in
       type = lib.types.listOf lib.types.str;
       default = [ ];
       description = ''
-        CUDA device numbers (as nvidia-smi numbers them, PCI order).
+        GPU device numbers: CUDA's as nvidia-smi numbers them (PCI order), or HIP's for the AMD engine.
         Empty: the engine picks the card with the most VRAM.
         Several: layer split across the cards.
       '';
@@ -156,10 +159,15 @@ in
       after = [ "network-online.target" ];
       path = [ cfg.package ];
 
-      environment = lib.optionalAttrs (cfg.gpus != [ ]) {
-        CUDA_DEVICE_ORDER = "PCI_BUS_ID";
-        CUDA_VISIBLE_DEVICES = lib.concatStringsSep "," cfg.gpus;
-      };
+      environment = lib.optionalAttrs (cfg.gpus != [ ]) (
+        if hip then
+          { HIP_VISIBLE_DEVICES = gpuList; }
+        else
+          {
+            CUDA_DEVICE_ORDER = "PCI_BUS_ID";
+            CUDA_VISIBLE_DEVICES = gpuList;
+          }
+      );
 
       preStart = lib.mkIf (cfg.prefetchOnStart && !cfg.mockEngine) (toString (
         pkgs.writeShellScript "strata-prestart" (''
@@ -176,8 +184,11 @@ in
             --hf-token-file "/run/credentials/strata.service/hf-token" \
         '' + ''
             --emit-config "$state/config.json" \
-            --engine ${lib.escapeShellArg (toString cfg.package.passthru.engine)}/bin/strata \
+            --engine ${lib.escapeShellArg (toString engine)}/bin/strata \
             --host ${lib.escapeShellArg cfg.host} \
+        '' + lib.optionalString hip ''
+            --backend hip \
+            --engine-env STRATA_HIPBLASLT_TUNING=${engine}/${engine.hipblasltTuning} \
         '' + lib.optionalString (cfg.apiKeyFile != null) ''
             --api-key-file "/run/credentials/strata.service/api-key" \
         '' + lib.optionalString (cfg.gpus != [ ]) ''
@@ -224,6 +235,12 @@ in
         RestrictAddressFamilies = [ "AF_UNIX" "AF_INET" "AF_INET6" ];
         LockPersonality = true;
         MemoryDenyWriteExecute = false;
+      }
+      // lib.optionalAttrs hip {
+        # /dev/kfd and /dev/dri/renderD*
+        SupplementaryGroups = [ "render" "video" ];
+        # ROCm page-locks the host expert arena
+        LimitMEMLOCK = "infinity";
       };
     };
 

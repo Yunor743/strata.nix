@@ -206,6 +206,9 @@ def main() -> int:
     ap.add_argument("--low-ram", choices=["on", "off"], help="default: on when the experts would not fit the RAM")
     ap.add_argument("--emit-config")
     ap.add_argument("--engine")
+    ap.add_argument("--backend", default="cuda", choices=["cuda", "hip"])
+    ap.add_argument("--engine-env", action="append", default=[], metavar="KEY=VALUE",
+                    help="environment for the engine process (AMD: STRATA_HIPBLASLT_TUNING)")
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int)
     ap.add_argument("--gpu")
@@ -314,6 +317,10 @@ def main() -> int:
             fail("--emit-config needs --engine")
         cfg = {"exe": a.engine, "args": args, "tokenizer": prepared["tokenizer"], "model_name": fam["name"],
                "log": str(data / f"engine-{fam['tag'].lower()}{a.model.lower()}.log")}
+        if a.backend != "cuda":
+            cfg["backend"] = a.backend
+        if a.engine_env:
+            cfg["env"] = dict(kv.split("=", 1) for kv in a.engine_env)
         if a.host:
             cfg["host"] = a.host
         if a.gpu:
