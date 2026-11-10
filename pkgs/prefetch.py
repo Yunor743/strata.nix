@@ -309,7 +309,7 @@ def main() -> int:
     ap.add_argument("--family", default="swift", choices=sorted(FAMILIES))
     ap.add_argument("--model", default="IQ2_XS", choices=sorted(QUANTS))
     ap.add_argument("--context", type=int, default=32768,
-                    choices=[8192, 32768, 65536, 131072, 204800, 262144, 393216, 524288, 1048576])
+                    choices=[8192, 32768, 65536, 131072, 204800, 262144, 393216, 524288, 786432, 1048576])
     ap.add_argument("--data-dir", required=True)
     ap.add_argument("--gguf-dir", help="a directory holding the family's shard files already downloaded")
     ap.add_argument("--low-ram", choices=["on", "off"], help="default: on when the experts would not fit the RAM")

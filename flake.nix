@@ -109,6 +109,9 @@
         module-parallel = pkgs.callPackage ./checks/module-parallel.nix {
           strataModule = self.nixosModules.default;
         };
+        module-extra-args = pkgs.callPackage ./checks/module-extra-args.nix {
+          strataModule = self.nixosModules.default;
+        };
         prefetch-vision = pkgs.callPackage ./checks/prefetch-vision.nix {
           strataPkg = strataPkgs.strata;
         };
