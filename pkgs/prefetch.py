@@ -316,6 +316,9 @@ def main() -> int:
     ap.add_argument("--vision", choices=["off", "auto", "cpu", "gpu"], default="auto",
                     help="images: auto picks the GPU encoder from 24 GB of VRAM, the CPU one below")
     ap.add_argument("--vision-exe", help="the packaged strata-vision binary (needed when --vision is not off)")
+    ap.add_argument("--parallel", type=int, metavar="N",
+                    help="several requests at once (2-8); written into the config's 'parallel' key, "
+                         "which the server turns into the engine's batch slots (it lowers N itself when VRAM is short)")
     ap.add_argument("--emit-config")
     ap.add_argument("--dry-run", action="store_true",
                     help="print what would be downloaded and built, then stop")
@@ -375,7 +378,7 @@ def main() -> int:
 
     if a.dry_run:
         say(f"[strata-prefetch] plan for {a.family}/{a.model} (context {a.context}, vision {mode}, "
-            f"low-ram {low_ram}):")
+            f"parallel {a.parallel or 1}, low-ram {low_ram}):")
         for url, dst, what, want in plan:
             say(f"  {what}\n    {url}\n    into {dst}" + (f"\n    sha256 {want}" if want else ""))
         if not plan:
@@ -485,6 +488,10 @@ def main() -> int:
             cfg["sampling"] = json.loads(Path(a.sampling_json).read_text(encoding="utf-8"))
         if a.mcp_json:
             cfg["mcp_servers"] = json.loads(Path(a.mcp_json).read_text(encoding="utf-8"))
+        if a.parallel is not None and a.parallel >= 2:
+            # the server turns this into the engine's batch slots (--batch N), lowering N itself
+            # when the card is short of VRAM (serve/server.py's parallel_args / fit_parallel)
+            cfg["parallel"] = a.parallel
         if vision:
             cfg["vision"] = vision
         out = Path(a.emit_config)

@@ -88,6 +88,18 @@ in
       '';
     };
 
+    parallel = lib.mkOption {
+      type = lib.types.nullOr (lib.types.ints.between 1 8);
+      default = null;
+      description = ''
+        Several requests answered at once (2-8): each slot keeps its own session context in
+        VRAM, so agents that run several sessions or several people on one host stop waiting
+        for each other.  Null (the default): requests take turns, one at a time.  The server
+        turns this into the engine's batch slots and lowers the number itself when the card
+        is short of VRAM; N over the engine's limit is clamped, not refused.
+      '';
+    };
+
     lowRam = lib.mkOption {
       type = lib.types.nullOr lib.types.bool;
       default = null;
@@ -196,6 +208,8 @@ in
             --vision ${cfg.vision} \
         '' + lib.optionalString (cfg.vision != "off") ''
             --vision-exe ${lib.escapeShellArg (toString cfg.package.passthru.vision)}/bin/strata-vision \
+        '' + lib.optionalString (cfg.parallel != null) ''
+            --parallel ${toString cfg.parallel} \
         '' + lib.optionalString (cfg.hfTokenFile != null) ''
             --hf-token-file "/run/credentials/strata.service/hf-token" \
         '' + ''
