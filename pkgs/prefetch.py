@@ -81,7 +81,8 @@ QUANTS = {
 # The picture reader's mmproj file per family, at the revision upstream setup.py pins (its HF_REVISIONS and
 # ISTA_FILES / SWIFT_FILES tables; the sha256 values are the Hub's LFS pointers).  The coder family shares the
 # original's picture reader (upstream: "its shard 2 and vision encoder are the original's files").  The
-# abliterated family (SC117's repo, a strata.nix-only variant) publishes no mmproj: images stay off for it.
+# abliterated family takes SC117's own picture reader (same name, published beside the text shards, 64 bytes
+# shorter than the original's - so a pin of its own, not an alias).
 VISION_FILES = {
     "qwen": {
         "repo": "ISTA-DASLab/Qwen3.8-Flash-Next-GSQ-RCO-GGUF",
@@ -94,6 +95,12 @@ VISION_FILES = {
         "revision": "99bb8f7f95c7aa7b24a36a7786a4f657b30f5d3d",
         "file": "mmproj-Swift-Qwen3.8-Flash-Next-BF16.gguf",
         "sha256": "cd1140f4abba943ce8d9fa92fed8407e389954d26907efde7b72153c75bd8a60",
+    },
+    "abliterated": {
+        "repo": "SC117/Swift-1.5-Qwen3.8-Flash-Next-GSQ-RCO-abliterated-GGUF",
+        "revision": "3db919a964b1f0ae0d1000ba7be90b3e38b1f7a3",
+        "file": "mmproj-Qwen3.8-Flash-Next-BF16.gguf",
+        "sha256": "2e788f8c511d8093c7b43cb87b2fd7e14228340318057f8fb20c86df2efe2355",
     },
 }
 VISION_FILES["coder"] = VISION_FILES["qwen"]

@@ -70,7 +70,7 @@ That is normal. API: `http://127.0.0.1:8080/v1/chat/completions` (OpenAI) and
 | `hfTokenFile` | `null` | Hugging Face token file, only for gated repos. |
 | `openFirewall` | `false` | Open the TCP port in the firewall. |
 | `gpus` | `[ ]` | CUDA device indices; several = layer split. Empty: the card with the most VRAM. |
-| `vision` | `auto` | Images: `auto` picks the GPU encoder (~1.4 GB of VRAM) on a card of 24 GB or more, the CPU encoder (a few seconds a picture) below, like upstream; `gpu` / `cpu` force one; `off` is text only. Not available for the `abliterated` family (no picture reader is published for it). |
+| `vision` | `auto` | Images: `auto` picks the GPU encoder (~1.4 GB of VRAM) on a card of 24 GB or more, the CPU encoder (a few seconds a picture) below, like upstream; `gpu` / `cpu` force one; `off` is text only. The `abliterated` family takes SC117's own picture reader (same name, published beside the text shards). |
 | `lowRam` | `null` | Map experts from disk instead of RAM copies (auto when RAM is short). |
 | `sampling` | `{ }` | Sampling defaults (temperature, top_p, top_k, ...). |
 | `mcpServers` | `{ }` | MCP servers for the web chat (Claude Desktop format; they run with the service's rights). |

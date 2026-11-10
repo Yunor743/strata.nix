@@ -36,11 +36,11 @@ stdenv.mkDerivation {
       --data-dir $NIX_BUILD_TOP/data --vision off > plan-off.txt
     if grep -q "picture reader" plan-off.txt; then echo "vision off must fetch no picture reader"; exit 1; fi
 
-    if ${strataPkg}/bin/strata-prefetch --dry-run --family abliterated --model Q2_0 \
-      --data-dir $NIX_BUILD_TOP/data --vision gpu --vision-exe /bin/strata-vision > abliterated.out; then
-      echo "abliterated with vision should be refused"; exit 1
-    fi
-    grep -q "no picture reader file is published" abliterated.out
+    ${strataPkg}/bin/strata-prefetch --dry-run --family abliterated --model Q2_0 \
+      --data-dir $NIX_BUILD_TOP/data --vision gpu --vision-exe /bin/strata-vision > plan-abliterated.txt
+    grep -q "vision gpu" plan-abliterated.txt
+    grep -q "SC117/Swift-1.5-Qwen3.8-Flash-Next-GSQ-RCO-abliterated-GGUF" plan-abliterated.txt
+    grep -q "sha256 2e788f8c511d8093c7b43cb87b2fd7e14228340318057f8fb20c86df2efe2355" plan-abliterated.txt
 
     if ${strataPkg}/bin/strata-prefetch --dry-run --family qwen --model IQ2_XS \
       --data-dir $NIX_BUILD_TOP/data --vision gpu > noexe.out; then
