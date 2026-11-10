@@ -9,7 +9,7 @@ and serves it over an OpenAI- and Anthropic-compatible API on localhost.
 │ your apps   │ ────  HTTP  API  ───▶ │  strata-serve │ ───────────────▶ │ strata engine  │
 │ / web chat  │   http://127.0.0.1    │  (python)     │                  │ (CUDA, built   │
 └─────────────┘                       └───────────────┘                  │  from source)  │
-                                                                          └────────────────┘
+                                                                         └────────────────┘
         weights: downloaded once (resumable) into /var/lib/strata, not in the nix store
 ```
 
