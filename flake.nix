@@ -46,6 +46,7 @@
     {
       overlays.default = final: prev: {
         strata-engine = strataPkgs.strata-engine;
+        strata-vision = strataPkgs.strata-vision;
         strata-serve = strataPkgs.strata-serve;
         strata = strataPkgs.strata;
       };
@@ -57,11 +58,18 @@
           llamaSrc = llama-pinned;
         };
 
+        strata-vision = pkgs.callPackage ./pkgs/vision.nix {
+          inherit version ggmlPin pinChecked;
+          src = inputs.strata;
+          llamaSrc = llama-pinned;
+        };
+
         strata-serve = pkgs.callPackage ./pkgs/serve.nix {
           inherit version pinChecked;
           strataSrc = inputs.strata;
           llamaSrc = llama-pinned;
           engine = strata-engine;
+          vision = strata-vision;
         };
 
         strata = strata-serve;
@@ -94,6 +102,12 @@
         };
         module-vm = pkgs.callPackage ./checks/vm.nix {
           strataModule = self.nixosModules.default;
+        };
+        module-vision = pkgs.callPackage ./checks/module-vision.nix {
+          strataModule = self.nixosModules.default;
+        };
+        prefetch-vision = pkgs.callPackage ./checks/prefetch-vision.nix {
+          strataPkg = strataPkgs.strata;
         };
       };
 

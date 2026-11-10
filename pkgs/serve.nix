@@ -6,6 +6,7 @@
   strataSrc,
   llamaSrc,
   engine,
+  vision ? null,
   version,
   pinChecked ? true,
 }:
@@ -63,6 +64,7 @@ stdenvNoCC.mkDerivation {
 
   passthru = {
     engine = engine;
+    vision = vision;
     inherit share py;
     prefetchFlags = { };
   };

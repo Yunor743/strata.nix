@@ -8,7 +8,9 @@ Steps (each skipped when already done):
   1. download shard 1 + the PLE shard from Hugging Face (resumable, size-verified)
   2. build the pack with upstream tools (iq_pack.py: tensors + tokenizer)
   3. fetch and pack the MTP draft layer (~5 GB, from the original Qwen checkpoint)
-  4. write prepared.json and, with --emit-config, the engine run config for serve/server.py
+  4. with images on: fetch the picture reader's mmproj (sha256-verified) and write the
+     config's vision block (exe, mmproj, model, gpu, ...) for serve/server.py
+  5. write prepared.json and, with --emit-config, the engine run config for serve/server.py
 
 No model weights are installed by nix: they live in --data-dir.  A fully prepared
 data dir needs no network (the .done marks short-circuit every download).
@@ -16,6 +18,7 @@ data dir needs no network (the .done marks short-circuit every download).
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import shutil
@@ -75,6 +78,32 @@ QUANTS = {
     "IQ1_M": {"arena_gb": 23.4, "ram_gb": 32, "families": ("coder",)},
 }
 
+# The picture reader's mmproj file per family, at the revision upstream setup.py pins (its HF_REVISIONS and
+# ISTA_FILES / SWIFT_FILES tables; the sha256 values are the Hub's LFS pointers).  The coder family shares the
+# original's picture reader (upstream: "its shard 2 and vision encoder are the original's files").  The
+# abliterated family (SC117's repo, a strata.nix-only variant) publishes no mmproj: images stay off for it.
+VISION_FILES = {
+    "qwen": {
+        "repo": "ISTA-DASLab/Qwen3.8-Flash-Next-GSQ-RCO-GGUF",
+        "revision": "ed59f92082b1e93c0e96d60a8b11aab089b52f09",
+        "file": "mmproj-Qwen3.8-Flash-Next-BF16.gguf",
+        "sha256": "b1a82259702816a5330d7bd7607cd9676b11780e79ff7348c21103ff3ce49bd0",
+    },
+    "swift": {
+        "repo": "ukisai/Swift-1.5-Qwen3.8-Flash-Next-GSQ-RCO-GGUF",
+        "revision": "99bb8f7f95c7aa7b24a36a7786a4f657b30f5d3d",
+        "file": "mmproj-Swift-Qwen3.8-Flash-Next-BF16.gguf",
+        "sha256": "cd1140f4abba943ce8d9fa92fed8407e389954d26907efde7b72153c75bd8a60",
+    },
+}
+VISION_FILES["coder"] = VISION_FILES["qwen"]
+
+# The GPU image encoder takes about 1.4 GB of VRAM; upstream puts it on cards of 24 GB or more
+# (strata_control/vision_reader.py's GPU_MIN_VRAM_GB = 23.5) and reads pictures on the CPU below.
+VISION_GPU_MIN_VRAM_MIB = 24064
+VISION_MAX_TOKENS = {"gpu": 1024, "cpu": 300}   # setup.py's VISION table (the most image tokens a picture becomes)
+VISION_THREADS_CAP = 16
+
 
 def say(msg=""):
     print(msg, flush=True)
@@ -107,10 +136,26 @@ def token_headers() -> dict:
     return {"Authorization": f"Bearer {tok}", "User-Agent": "strata-nix"} if tok else {"User-Agent": "strata-nix"}
 
 
-def download(url: str, dst: Path, what: str, token=None) -> None:
-    """Resumable download with a size check, like upstream setup.py (a .done mark short-circuits)."""
+def sha256_of(path: Path) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for b in iter(lambda: f.read(1 << 22), b""):
+            h.update(b)
+    return h.hexdigest()
+
+
+def sha_ok(path: Path, want: str) -> bool:
+    return sha256_of(path) == want
+
+
+def download(url: str, dst: Path, what: str, token=None, want=None) -> None:
+    """Resumable download with a size check, like upstream setup.py (a .done mark short-circuits).
+    `want` is a sha256 the file is checked against when given (the picture reader's mmproj; the
+    shards stay size-checked, a 40 GB re-hash at every start would cost minutes)."""
     dst.parent.mkdir(parents=True, exist_ok=True)
     if dst.exists() and done(dst):
+        if want and not sha_ok(dst, want):
+            fail(f"{what}: on disk but its sha256 is not the published one", "delete it and run again")
         ok(f"{what} already present")
         return
     headers = token_headers()
@@ -127,6 +172,9 @@ def download(url: str, dst: Path, what: str, token=None) -> None:
                 fail(f"cannot reach {url.split('/')[2]} ({e})", "check the network and run again (everything else is kept)")
             time.sleep(5)
     if dst.exists() and total and dst.stat().st_size == total:
+        if want and not sha_ok(dst, want):
+            fail(f"{what}: already the right size but its sha256 is not the published one",
+                 "delete it and run again")
         mark(dst)
         ok(f"{what} already present")
         return
@@ -161,6 +209,9 @@ def download(url: str, dst: Path, what: str, token=None) -> None:
     if total and part.stat().st_size != total:
         fail(f"could not finish downloading {dst.name}", "check the network and run again (the download resumes)")
     part.replace(dst)
+    if want and not sha_ok(dst, want):
+        dst.unlink()
+        fail(f"{dst.name}: the sha256 does not match the published one", "delete it and run again")
     mark(dst)
     ok(f"{what} downloaded")
 
@@ -195,6 +246,57 @@ def mem_total_gb() -> float:
     return 0.0
 
 
+def nvidia_smi() -> str | None:
+    found = shutil.which("nvidia-smi")
+    for cand in (found, "/run/current-system/sw/bin/nvidia-smi", "/usr/bin/nvidia-smi"):
+        if cand and os.path.exists(cand):
+            return cand
+    return None
+
+
+def vram_mib(gpu: str | None) -> int | None:
+    """The card's VRAM as nvidia-smi reports it, in MiB: the --gpu card when one is named, else the card with
+    the most (the engine's own pick).  None when nvidia-smi cannot be asked."""
+    smi = nvidia_smi()
+    if smi is None:
+        return None
+    cmd = [smi, "--query-gpu=memory.total", "--format=csv,noheader,nounits"]
+    if gpu:
+        # nvidia-smi -i and the engine's CUDA_DEVICE_ORDER=PCI_BUS_ID number the cards alike
+        cmd += ["-i", gpu.split(",")[0].strip()]
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+    except OSError:
+        return None
+    if r.returncode != 0:
+        return None
+    values = [int(v) for v in r.stdout.splitlines() if v.strip().isdigit()]
+    return max(values) if values else None
+
+
+def resolve_vision(asked: str, gpu: str | None) -> str:
+    """'auto' -> the GPU encoder on a card of 24 GB of VRAM or more, the CPU encoder below (upstream's rule);
+    what was asked for otherwise, kept as it is."""
+    if asked != "auto":
+        mib = vram_mib(gpu)
+        if asked == "gpu" and mib is not None and 0 < mib < VISION_GPU_MIN_VRAM_MIB:
+            say(f"[strata-prefetch] images: the GPU encoder keeps ~1.4 GB of VRAM that a {mib / 1024:.0f} GB card "
+                "would use for experts; kept as asked (--vision cpu reads pictures on the CPU instead)")
+        return asked
+    mib = vram_mib(gpu)
+    if mib is None:
+        say("[strata-prefetch] images: no nvidia-smi to ask the card's memory; the CPU encoder it is")
+        return "cpu"
+    mode = "gpu" if mib >= VISION_GPU_MIN_VRAM_MIB else "cpu"
+    say(f"[strata-prefetch] images: the {mode} encoder (the card has {mib / 1024:.1f} GB of VRAM)")
+    return mode
+
+
+def vision_threads() -> int:
+    """The CPU encoder's threads: one per physical core (half the logical ones), at most 16 (upstream's rule)."""
+    return max(1, min((os.cpu_count() or 8) // 2, VISION_THREADS_CAP))
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--family", default="swift", choices=sorted(FAMILIES))
@@ -204,7 +306,12 @@ def main() -> int:
     ap.add_argument("--data-dir", required=True)
     ap.add_argument("--gguf-dir", help="a directory holding the family's shard files already downloaded")
     ap.add_argument("--low-ram", choices=["on", "off"], help="default: on when the experts would not fit the RAM")
+    ap.add_argument("--vision", choices=["off", "auto", "cpu", "gpu"], default="auto",
+                    help="images: auto picks the GPU encoder from 24 GB of VRAM, the CPU one below")
+    ap.add_argument("--vision-exe", help="the packaged strata-vision binary (needed when --vision is not off)")
     ap.add_argument("--emit-config")
+    ap.add_argument("--dry-run", action="store_true",
+                    help="print what would be downloaded and built, then stop")
     ap.add_argument("--engine")
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int)
@@ -221,12 +328,26 @@ def main() -> int:
     if a.family not in allowed:
         fail(f"{a.model} is only published for: {', '.join(allowed)} (not {a.family})")
 
+    low_ram = (a.low_ram or "auto")
+    if low_ram == "auto":
+        low_ram = "on" if mem_total_gb() < quant["ram_gb"] else "off"
+
+    # images: which encoder runs, and the family's picture reader file (None: none is published for it)
+    mode = resolve_vision(a.vision, a.gpu)
+    v = VISION_FILES.get(a.family) if mode != "off" else None
+    if mode != "off" and v is None:
+        fail(f"no picture reader file is published for the {a.family} family",
+             'set vision = "off" (text only), or use a family that has one (qwen, swift, coder)')
+    if v is not None and not a.vision_exe:
+        fail("--vision needs --vision-exe (the packaged strata-vision binary)")
+
     data = Path(a.data_dir)
     models = data / "models"
     pack = data / "packs" / (fam["tag"].lower() + a.model.lower())
     mtp = data / "mtp"
     rt = mtp / "rt"
 
+    token = Path(a.hf_token_file).read_text(encoding="utf-8").strip() if a.hf_token_file else None
     if a.gguf_dir:
         gdir = Path(a.gguf_dir)
         shards = [gdir / fam["file"].format(q=a.model, i=i) for i in (1, 2)]
@@ -234,11 +355,31 @@ def main() -> int:
     else:
         base = fam["base"].format(q=a.model)
         shards = [models / fam["file"].format(q=a.model, i=i) for i in (1, 2)]
-        token = None
-        if a.hf_token_file:
-            token = Path(a.hf_token_file).read_text(encoding="utf-8").strip()
-        for i, (s, label) in enumerate(zip(shards, (f"{a.family}/{a.model} shard 1", f"{a.family}/{a.model} shard 2"))):
-            download(base + s.name, s, label, token=token)
+
+    plan = []
+    if not a.gguf_dir:
+        for s, label in zip(shards, (f"{a.family}/{a.model} shard 1", f"{a.family}/{a.model} shard 2")):
+            plan.append((base + s.name, s, label, None))
+    mmproj = None
+    if v is not None:
+        mmproj = models / v["file"]
+        plan.append(("https://huggingface.co/" + v["repo"] + "/resolve/" + v["revision"] + "/" + v["file"],
+                     mmproj, f"picture reader {v['file']}", v["sha256"]))
+
+    if a.dry_run:
+        say(f"[strata-prefetch] plan for {a.family}/{a.model} (context {a.context}, vision {mode}, "
+            f"low-ram {low_ram}):")
+        for url, dst, what, want in plan:
+            say(f"  {what}\n    {url}\n    into {dst}" + (f"\n    sha256 {want}" if want else ""))
+        if not plan:
+            say("  (nothing to download)")
+        say(f"  then: the pack in {pack} with tools/iq_pack.py"
+            + (", then the pack's experts.bin file (low-RAM mode)" if low_ram == "on" else "")
+            + f", then the MTP draft layer in {rt}")
+        return 0
+
+    for url, dst, what, want in plan:
+        download(url, dst, what, token=token, want=want)
 
     shard1 = shards[0]
     for s in shards:
@@ -258,9 +399,6 @@ def main() -> int:
     else:
         ok(f"pack already built: {pack}")
 
-    low_ram = (a.low_ram or "auto")
-    if low_ram == "auto":
-        low_ram = "on" if mem_total_gb() < quant["ram_gb"] else "off"
     if low_ram == "on":
         if not (pack / "experts.bin").exists():
             say("[strata-prefetch] building the experts.bin file (low-RAM mode, a few minutes) ...")
@@ -301,13 +439,29 @@ def main() -> int:
         # factor = final / trained, like upstream setup does.
         # An explicit --rope-scaling among the extra args takes over.
         args += ["--rope-scaling", "yarn", "--rope-scale", f"{a.context / 262144:g}"]
+    if mode != "off":
+        # the engine flag that turns image input on, and, for a GPU encoder, the VRAM the encoder
+        # needs kept free (upstream setup writes the same 700 MiB; an explicit reserve of the
+        # user's own in the extra args takes over)
+        args.append("--vision")
+        if mode == "gpu" and not any(x == "--vram-reserve-mib" for x in a.extra_arg):
+            args += ["--vram-reserve-mib", "700"]
     args += a.extra_arg
 
+    vision = None
+    if v is not None:
+        # the run config's vision block (serve/server.py's Vision: exe --mmproj --model [--gpu]
+        # [--threads] [--max-tokens]); "model" is the text model's first shard, opened vocab-only
+        vision = {"exe": a.vision_exe, "mmproj": str(mmproj), "model": str(shard1),
+                  "gpu": mode == "gpu", "max_tokens": VISION_MAX_TOKENS[mode]}
+        if mode == "cpu":
+            vision["threads"] = vision_threads()
+
     prepared = {"args": args, "tokenizer": str(pack / "tokenizer"), "model_name": fam["name"],
-                "context": a.context, "low_ram": low_ram == "on"}
+                "context": a.context, "low_ram": low_ram == "on", "vision": mode}
     (data / f"prepared-{fam['tag'].lower()}{a.model.lower()}.json").write_text(json.dumps(prepared, indent=1),
                                                                               encoding="utf-8")
-    ok(f"prepared: pack={pack} mtp={rt} context={a.context}")
+    ok(f"prepared: pack={pack} mtp={rt} context={a.context} vision={mode}")
 
     if a.emit_config:
         if not a.engine:
@@ -324,6 +478,8 @@ def main() -> int:
             cfg["sampling"] = json.loads(Path(a.sampling_json).read_text(encoding="utf-8"))
         if a.mcp_json:
             cfg["mcp_servers"] = json.loads(Path(a.mcp_json).read_text(encoding="utf-8"))
+        if vision:
+            cfg["vision"] = vision
         out = Path(a.emit_config)
         out.write_text(json.dumps(cfg, indent=1), encoding="utf-8")
         if a.api_key_file:

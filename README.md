@@ -17,7 +17,8 @@ and serves it over an OpenAI- and Anthropic-compatible API on localhost.
 
 - NixOS on **x86_64-linux** with an NVIDIA RTX 20/30/40/50 GPU (12 GB VRAM or more)
   and the official driver (580+). About 64 GB of RAM for IQ2_XS and below.
-- ~70 GB of free disk space for the model files (downloaded at first service start).
+- ~70 GB of free disk space for the model files (downloaded at first service start),
+  plus ~0.9 GB for the picture reader when images are on (`vision` not `off`).
 
 ## Quick start
 
@@ -45,8 +46,10 @@ and serves it over an OpenAI- and Anthropic-compatible API on localhost.
 The service:
 
 1. (first start) downloads the model shards from Hugging Face and builds the pack and
-   the MTP draft layer. Interrupted? Start again, it picks up where it left off;
-2. writes `/var/lib/strata/config.json` (engine arguments, API key if any);
+   the MTP draft layer - and, with `vision` not `off`, the picture reader's mmproj
+   (~0.9 GB, sha256-checked). Interrupted? Start again, it picks up where it left off;
+2. writes `/var/lib/strata/config.json` (engine arguments, the vision block if images
+   are on, API key if any);
 3. starts `strata-serve` on `http://127.0.0.1:8080`.
 
 Loading pushes 35-55 GB into RAM and the machine can crawl for 1-3 minutes.
@@ -67,6 +70,7 @@ That is normal. API: `http://127.0.0.1:8080/v1/chat/completions` (OpenAI) and
 | `hfTokenFile` | `null` | Hugging Face token file, only for gated repos. |
 | `openFirewall` | `false` | Open the TCP port in the firewall. |
 | `gpus` | `[ ]` | CUDA device indices; several = layer split. Empty: the card with the most VRAM. |
+| `vision` | `auto` | Images: `auto` picks the GPU encoder (~1.4 GB of VRAM) on a card of 24 GB or more, the CPU encoder (a few seconds a picture) below, like upstream; `gpu` / `cpu` force one; `off` is text only. Not available for the `abliterated` family (no picture reader is published for it). |
 | `lowRam` | `null` | Map experts from disk instead of RAM copies (auto when RAM is short). |
 | `sampling` | `{ }` | Sampling defaults (temperature, top_p, top_k, ...). |
 | `mcpServers` | `{ }` | MCP servers for the web chat (Claude Desktop format; they run with the service's rights). |
@@ -94,6 +98,9 @@ services.strata = {
   (the download/prepare tool, usable standalone; `strata-prefetch --help`).
 - `strata-engine`, the CUDA inference binary built from source
   (`strata-engine.override { cudaArch = "120"; }` for an RTX 50 card; default `89` = RTX 40).
+- `strata-vision`, the image encoder (llama.cpp's mtmd at the pinned commit with
+  Qwen3.8-Flash-Next's vision tower), started by the server only while it reads a
+  picture (`strata-vision.override { cudaArch = "120"; }` likewise).
 - The model weights are **not** packaged: they are downloaded at runtime into the
   service's state directory (the nix store would not survive a 70 GB model well).
 
@@ -113,6 +120,9 @@ actually run. `nix flake lock --update-input strata` pulls new releases
 - `nix flake check`: a serve smoke test (mock engine: HTTP endpoints without a GPU)
   and a NixOS VM test of the systemd service with the mock engine.
 - `nix build .#strata-engine`: the real compile (20-40 minutes, once, cached after).
+- `nix build .#strata-vision`: the image encoder's compile (llama.cpp's mtmd and ggml's
+  CUDA kernels).
+- `strata-prefetch --dry-run` prints what would be downloaded and built, without doing it.
 
 ## Licenses
 

@@ -76,6 +76,18 @@ in
       '';
     };
 
+    vision = lib.mkOption {
+      type = lib.types.enum [ "off" "auto" "cpu" "gpu" ];
+      default = "auto";
+      description = ''
+        Images (OpenAI image_url parts, Anthropic image blocks, the web chat's paperclip):
+        `auto` picks the GPU encoder (about 1.4 GB of VRAM the engine reserves) on a card of 24 GB
+        or more and the CPU encoder (a few seconds a picture, no VRAM) below, like upstream;
+        `gpu` and `cpu` force one; `off` is text only.  With images on, strata-prefetch also
+        fetches the picture reader file (~0.9 GB) for the family.
+      '';
+    };
+
     lowRam = lib.mkOption {
       type = lib.types.nullOr lib.types.bool;
       default = null;
@@ -143,6 +155,14 @@ in
         message = "services.strata: mockEngine requires prefetchOnStart = false.";
       }
       {
+        assertion = !cfg.mockEngine || cfg.vision == "off";
+        message = "services.strata: mockEngine serves text only; set vision = \"off\" with it.";
+      }
+      {
+        assertion = cfg.mockEngine || cfg.vision == "off" || (cfg.package ? passthru.vision);
+        message = "services.strata: with vision on, package must be the strata-serve bundle (it carries the vision encoder under passthru.vision).";
+      }
+      {
         assertion = cfg.mockEngine || (cfg.package ? passthru.engine);
         message = "services.strata: package must be the strata-serve bundle (it carries the engine under passthru.engine).";
       }
@@ -172,6 +192,10 @@ in
             --data-dir "$state" \
         '' + lib.optionalString (cfg.lowRam != null) ''
             --low-ram ${if cfg.lowRam then "on" else "off"} \
+        '' + ''
+            --vision ${cfg.vision} \
+        '' + lib.optionalString (cfg.vision != "off") ''
+            --vision-exe ${lib.escapeShellArg (toString cfg.package.passthru.vision)}/bin/strata-vision \
         '' + lib.optionalString (cfg.hfTokenFile != null) ''
             --hf-token-file "/run/credentials/strata.service/hf-token" \
         '' + ''

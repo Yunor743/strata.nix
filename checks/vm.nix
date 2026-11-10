@@ -12,6 +12,7 @@ testers.nixosTest {
       enable = true;
       mockEngine = true;
       prefetchOnStart = false;
+      vision = "off";              # the mock engine serves text only
       port = 8080;
     };
     environment.systemPackages = [ pkgs.curl ];
